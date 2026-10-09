@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/karabas/yakamoz/internal/platform/httpx"
 	"github.com/karabas/yakamoz/internal/uuid"
@@ -67,6 +68,32 @@ func (h *Handler) ListByTopic(w http.ResponseWriter, r *http.Request) {
 	result := make([]commentResponse, 0, len(values))
 	for _, value := range values {
 		result = append(result, response(value))
+	}
+	httpx.WriteJSON(w, http.StatusOK, result)
+}
+
+func (h *Handler) CountByTopics(w http.ResponseWriter, r *http.Request) {
+	values := strings.Split(r.URL.Query().Get("topic_ids"), ",")
+	if len(values) == 1 && values[0] == "" {
+		values = nil
+	}
+	topicIDs := make([]uuid.UUID, 0, len(values))
+	for _, value := range values {
+		id, err := uuid.Parse(value)
+		if err != nil {
+			writeError(w, ErrInvalid)
+			return
+		}
+		topicIDs = append(topicIDs, id)
+	}
+	counts, err := h.service.CountByTopics(r.Context(), topicIDs)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	result := make(map[string]int, len(counts))
+	for id, count := range counts {
+		result[id.String()] = count
 	}
 	httpx.WriteJSON(w, http.StatusOK, result)
 }

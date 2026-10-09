@@ -29,3 +29,11 @@ func TestNormalize(t *testing.T) {
 		t.Fatalf("Normalize() = %q, want tr", got)
 	}
 }
+
+func TestArabicPersianAndUrduAreSupported(t *testing.T) {
+	for _, language := range []string{"ar", "fa", "ur"} {
+		if !IsSupported(language) {
+			t.Errorf("IsSupported(%q) = false", language)
+		}
+	}
+}

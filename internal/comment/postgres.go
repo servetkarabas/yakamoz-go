@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
+	"strings"
 
 	"github.com/karabas/yakamoz/internal/platform/postgres"
 	"github.com/karabas/yakamoz/internal/uuid"
@@ -61,6 +63,36 @@ func (r *PostgresRepository) ListByTopic(ctx context.Context, filter ListFilter)
 		values = append(values, value)
 	}
 	return values, rows.Err()
+}
+
+func (r *PostgresRepository) CountByTopics(ctx context.Context, topicIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	counts := make(map[uuid.UUID]int, len(topicIDs))
+	if len(topicIDs) == 0 {
+		return counts, nil
+	}
+	placeholders := make([]string, len(topicIDs))
+	args := make([]any, len(topicIDs))
+	for i, id := range topicIDs {
+		counts[id] = 0
+		placeholders[i] = "$" + strconv.Itoa(i+1)
+		args[i] = id
+	}
+	rows, err := r.pool.QueryContext(ctx, `SELECT topic_id,COUNT(*) FROM comments WHERE topic_id IN (`+
+		strings.Join(placeholders, ",")+
+		`) GROUP BY topic_id`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var topicID uuid.UUID
+		var count int
+		if err := rows.Scan(&topicID, &count); err != nil {
+			return nil, err
+		}
+		counts[topicID] = count
+	}
+	return counts, rows.Err()
 }
 
 func (r *PostgresRepository) Delete(ctx context.Context, id uuid.UUID) error {

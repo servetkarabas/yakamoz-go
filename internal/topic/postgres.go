@@ -92,10 +92,15 @@ func (r *PostgresRepository) List(ctx context.Context, filter ListFilter) ([]Top
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := r.pool.QueryContext(ctx, `SELECT DISTINCT t.id,t.slug,t.original_language,t.status,t.created_by,t.created_at,t.updated_at
+	rows, err := r.pool.QueryContext(ctx, `SELECT DISTINCT t.id,t.slug,t.original_language,t.status,t.created_by,t.created_at,t.updated_at,
+		CASE WHEN $3='likes' THEN COALESCE(rc.likes,0) ELSE 0 END AS sort_likes
 		FROM topics t LEFT JOIN topic_translations tt ON tt.topic_id=t.id
+		LEFT JOIN (
+			SELECT target_id,COUNT(*) FILTER (WHERE reaction='like') AS likes
+			FROM reactions WHERE target_type='topic' GROUP BY target_id
+		) rc ON rc.target_id=t.id
 		WHERE ($1='' OR t.status=$1) AND ($2='' OR tt.language=$2)
-		ORDER BY t.created_at DESC LIMIT $3 OFFSET $4`, filter.Status, filter.Language, limit, max(filter.Offset, 0))
+		ORDER BY sort_likes DESC,t.created_at DESC LIMIT $4 OFFSET $5`, filter.Status, filter.Language, filter.Sort, limit, max(filter.Offset, 0))
 	if err != nil {
 		return nil, err
 	}
@@ -103,8 +108,9 @@ func (r *PostgresRepository) List(ctx context.Context, filter ListFilter) ([]Top
 	values := make([]Topic, 0)
 	for rows.Next() {
 		var value Topic
+		var sortLikes int
 		if err := rows.Scan(&value.ID, &value.Slug, &value.OriginalLanguage, &value.Status, &value.CreatedBy,
-			&value.CreatedAt, &value.UpdatedAt); err != nil {
+			&value.CreatedAt, &value.UpdatedAt, &sortLikes); err != nil {
 			return nil, err
 		}
 		value.Translations, err = r.translations(ctx, value.ID)

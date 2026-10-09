@@ -50,6 +50,18 @@ func (s *Service) ListByTopic(ctx context.Context, filter ListFilter) ([]Comment
 	return s.repo.ListByTopic(ctx, filter)
 }
 
+func (s *Service) CountByTopics(ctx context.Context, topicIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	if len(topicIDs) > 100 {
+		return nil, ErrInvalid
+	}
+	for _, id := range topicIDs {
+		if id == uuid.Nil {
+			return nil, ErrInvalid
+		}
+	}
+	return s.repo.CountByTopics(ctx, topicIDs)
+}
+
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if id == uuid.Nil {
 		return ErrInvalidID

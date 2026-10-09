@@ -30,10 +30,22 @@ func (r *MemoryRepository) Create(_ context.Context, value Author) error {
 	if _, ok := r.byEmail[email]; ok {
 		return ErrConflict
 	}
+	if value.Role != RoleAuthor && r.hasRole(value.Role, uuid.Nil) {
+		return ErrConflict
+	}
 	r.byID[value.ID] = value
 	r.byNickname[nickname] = value.ID
 	r.byEmail[email] = value.ID
 	return nil
+}
+
+func (r *MemoryRepository) hasRole(role Role, except uuid.UUID) bool {
+	for id, value := range r.byID {
+		if id != except && value.Role == role {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *MemoryRepository) GetByID(_ context.Context, id uuid.UUID) (Author, error) {
@@ -88,6 +100,12 @@ func (r *MemoryRepository) Update(_ context.Context, id uuid.UUID, update Update
 	}
 	if update.PreferredLanguage != nil {
 		value.PreferredLanguage = *update.PreferredLanguage
+	}
+	if update.Role != nil {
+		if *update.Role != RoleAuthor && r.hasRole(*update.Role, id) {
+			return Author{}, ErrConflict
+		}
+		value.Role = *update.Role
 	}
 	r.byID[id] = value
 	return value, nil

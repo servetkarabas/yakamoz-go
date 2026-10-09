@@ -18,10 +18,13 @@ func NewService(repo Repository) *Service {
 	return &Service{repo: repo, now: time.Now}
 }
 
-func (s *Service) Create(ctx context.Context, nickname, email, bio, preferredLanguage string) (Author, error) {
+func (s *Service) Create(ctx context.Context, nickname, email, bio, preferredLanguage string, role Role) (Author, error) {
+	if role == "" {
+		role = RoleAuthor
+	}
 	value := Author{
 		ID: uuid.New(), Nickname: strings.TrimSpace(nickname), Email: strings.TrimSpace(email), Bio: bio,
-		PreferredLanguage: preferredLanguage, Status: StatusActive, CreatedAt: s.now().UTC(),
+		PreferredLanguage: preferredLanguage, Role: role, Status: StatusActive, CreatedAt: s.now().UTC(),
 	}
 	value.UpdatedAt = value.CreatedAt
 	if err := value.Validate(); err != nil {
@@ -56,6 +59,9 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, update Update) (Auth
 		return Author{}, ErrInvalidID
 	}
 	if update.PreferredLanguage != nil && strings.TrimSpace(*update.PreferredLanguage) == "" {
+		return Author{}, ErrInvalid
+	}
+	if update.Role != nil && !update.Role.Valid() {
 		return Author{}, ErrInvalid
 	}
 	value, err := s.repo.Update(ctx, id, update)

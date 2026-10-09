@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-var Supported = []string{"tr", "en", "de", "fr", "es", "ar", "ru"}
+var Supported = []string{"tr", "en", "de", "fr", "es", "ar", "fa", "ur", "ru"}
 
 func Normalize(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))

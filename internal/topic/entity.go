@@ -65,6 +65,7 @@ func (t Topic) Validate() error {
 type ListFilter struct {
 	Language string
 	Status   Status
+	Sort     string
 	Limit    int
 	Offset   int
 }

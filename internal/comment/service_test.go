@@ -24,6 +24,25 @@ func TestServiceCreateAndList(t *testing.T) {
 	}
 }
 
+func TestServiceCountByTopics(t *testing.T) {
+	service := NewService(NewMemoryRepository())
+	firstTopic := uuid.New()
+	secondTopic := uuid.New()
+	for _, topicID := range []uuid.UUID{firstTopic, firstTopic, secondTopic} {
+		if _, err := service.Create(context.Background(), topicID, uuid.New(), "en", "comment"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	counts, err := service.CountByTopics(context.Background(), []uuid.UUID{firstTopic, secondTopic, uuid.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[firstTopic] != 2 || counts[secondTopic] != 1 {
+		t.Fatalf("counts = %#v", counts)
+	}
+}
+
 func TestServiceValidationAndNotFound(t *testing.T) {
 	service := NewService(NewMemoryRepository())
 	tests := []struct {

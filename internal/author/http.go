@@ -24,6 +24,7 @@ type authorResponse struct {
 	Email             string    `json:"email"`
 	Bio               string    `json:"bio"`
 	PreferredLanguage string    `json:"preferred_language"`
+	Role              Role      `json:"role"`
 	Status            Status    `json:"status"`
 	CreatedAt         string    `json:"created_at"`
 	UpdatedAt         string    `json:"updated_at"`
@@ -31,7 +32,7 @@ type authorResponse struct {
 
 func response(value Author) authorResponse {
 	return authorResponse{ID: value.ID, Nickname: value.Nickname, Email: value.Email, Bio: value.Bio,
-		PreferredLanguage: value.PreferredLanguage, Status: value.Status,
+		PreferredLanguage: value.PreferredLanguage, Role: value.Role, Status: value.Status,
 		CreatedAt: value.CreatedAt.Format("2006-01-02T15:04:05.000Z07:00"),
 		UpdatedAt: value.UpdatedAt.Format("2006-01-02T15:04:05.000Z07:00")}
 }
@@ -42,12 +43,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Email             string `json:"email"`
 		Bio               string `json:"bio"`
 		PreferredLanguage string `json:"preferred_language"`
+		Role              Role   `json:"role"`
 	}
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body is invalid: "+err.Error(), nil)
 		return
 	}
-	value, err := h.service.Create(r.Context(), request.Nickname, request.Email, request.Bio, request.PreferredLanguage)
+	value, err := h.service.Create(r.Context(), request.Nickname, request.Email, request.Bio, request.PreferredLanguage, request.Role)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -102,12 +104,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Bio               *string `json:"bio"`
 		PreferredLanguage *string `json:"preferred_language"`
+		Role              *Role   `json:"role"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_json", "request body is invalid", nil)
 		return
 	}
-	value, err := h.service.Update(r.Context(), id, Update{Bio: request.Bio, PreferredLanguage: request.PreferredLanguage})
+	value, err := h.service.Update(r.Context(), id, Update{Bio: request.Bio, PreferredLanguage: request.PreferredLanguage, Role: request.Role})
 	if err != nil {
 		writeError(w, err)
 		return
@@ -135,7 +138,7 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrNotFound):
 		httpx.WriteError(w, http.StatusNotFound, "not_found", "author not found", nil)
 	case errors.Is(err, ErrConflict):
-		httpx.WriteError(w, http.StatusConflict, "conflict", "author already exists", nil)
+		httpx.WriteError(w, http.StatusConflict, "conflict", "user already exists or role is already assigned", nil)
 	default:
 		httpx.WriteError(w, http.StatusInternalServerError, "internal_error", "internal server error", nil)
 	}

@@ -3,6 +3,7 @@ package topic
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/karabas/yakamoz/internal/platform/ai"
@@ -29,17 +30,23 @@ func NewService(repo Repository, translator ai.Translator, defaultLanguage strin
 func (s *Service) Create(ctx context.Context, title, description, language string, authorID uuid.UUID) (Topic, error) {
 	language = i18n.Normalize(language)
 	title = strings.TrimSpace(title)
-	if title == "" || language == "" || authorID == uuid.Nil {
+	slug := Slug(title)
+	if title == "" || language == "" || authorID == uuid.Nil || slug == "" {
 		return Topic{}, ErrInvalid
 	}
 	now := s.now().UTC()
 	translation := Translation{Language: language, Title: title, Description: description, Source: SourceHuman, TranslatedAt: now}
-	value := Topic{
-		ID: uuid.New(), Slug: Slug(title), OriginalLanguage: language, Status: StatusDraft, CreatedBy: authorID,
-		CreatedAt: now, UpdatedAt: now, Translations: map[string]Translation{language: translation},
+	translations := map[string]Translation{language: translation}
+	if language != "en" {
+		english, err := s.translateFields(ctx, translation, "en")
+		if err != nil {
+			return Topic{}, err
+		}
+		translations["en"] = english
 	}
-	if value.Slug == "" {
-		return Topic{}, ErrInvalid
+	value := Topic{
+		ID: uuid.New(), Slug: slug, OriginalLanguage: language, Status: StatusDraft, CreatedBy: authorID,
+		CreatedAt: now, UpdatedAt: now, Translations: translations,
 	}
 	if err := s.repo.Create(ctx, value); err != nil {
 		return Topic{}, err
@@ -52,11 +59,19 @@ func (s *Service) GetByID(ctx context.Context, id uuid.UUID, requestedLanguage s
 	if err != nil {
 		return Resolved{}, err
 	}
+	value, err = s.ensureTranslation(ctx, value, requestedLanguage)
+	if err != nil {
+		return Resolved{}, err
+	}
 	return s.resolve(value, requestedLanguage), nil
 }
 
 func (s *Service) GetBySlug(ctx context.Context, slug, requestedLanguage string) (Resolved, error) {
 	value, err := s.repo.GetBySlug(ctx, slug)
+	if err != nil {
+		return Resolved{}, err
+	}
+	value, err = s.ensureTranslation(ctx, value, requestedLanguage)
 	if err != nil {
 		return Resolved{}, err
 	}
@@ -72,9 +87,69 @@ func (s *Service) resolve(value Topic, requestedLanguage string) Resolved {
 	return Resolved{Topic: value, Translation: value.Translations[served], ServedLanguage: served}
 }
 
+func (s *Service) ensureTranslation(ctx context.Context, value Topic, language string) (Topic, error) {
+	language = i18n.Normalize(language)
+	if language == "" || !i18n.IsSupported(language) || language == value.OriginalLanguage {
+		return value, nil
+	}
+	if _, ok := value.Translations[language]; ok {
+		return value, nil
+	}
+	translation, err := s.translateFields(ctx, value.Translations[value.OriginalLanguage], language)
+	if err != nil {
+		return Topic{}, err
+	}
+	if err := s.repo.UpsertTranslation(ctx, value.ID, translation); err != nil {
+		return Topic{}, err
+	}
+	if value.Translations == nil {
+		value.Translations = make(map[string]Translation)
+	}
+	value.Translations[language] = translation
+	return value, nil
+}
+
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]Topic, error) {
-	filter.Language = i18n.Normalize(filter.Language)
-	return s.repo.List(ctx, filter)
+	language := i18n.Normalize(filter.Language)
+	filter.Language = ""
+	if filter.Sort != "likes" {
+		filter.Sort = "newest"
+	}
+	values, err := s.repo.List(ctx, filter)
+	if err != nil || language == "" {
+		return values, err
+	}
+
+	semaphore := make(chan struct{}, 4)
+	translationErrors := make(chan error, len(values))
+	var workers sync.WaitGroup
+	for index := range values {
+		workers.Add(1)
+		go func(index int) {
+			defer workers.Done()
+			select {
+			case semaphore <- struct{}{}:
+			case <-ctx.Done():
+				translationErrors <- ctx.Err()
+				return
+			}
+			defer func() { <-semaphore }()
+			translated, err := s.ensureTranslation(ctx, values[index], language)
+			if err != nil {
+				translationErrors <- err
+				return
+			}
+			values[index] = translated
+		}(index)
+	}
+	workers.Wait()
+	close(translationErrors)
+	for err := range translationErrors {
+		if err != nil {
+			return nil, err
+		}
+	}
+	return values, nil
 }
 
 func (s *Service) AddTranslation(ctx context.Context, id uuid.UUID, language, title, description string) (Translation, error) {
@@ -87,6 +162,43 @@ func (s *Service) AddTranslation(ctx context.Context, id uuid.UUID, language, ti
 		return Translation{}, err
 	}
 	return value, nil
+}
+
+func (s *Service) PreviewTranslation(ctx context.Context, id uuid.UUID, language string) (Translation, error) {
+	language = i18n.Normalize(language)
+	if id == uuid.Nil || language == "" {
+		return Translation{}, ErrInvalid
+	}
+	value, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return Translation{}, err
+	}
+	if language == value.OriginalLanguage {
+		return Translation{}, ErrInvalid
+	}
+	return s.translateFields(ctx, value.Translations[value.OriginalLanguage], language)
+}
+
+func (s *Service) translateFields(ctx context.Context, source Translation, target string) (Translation, error) {
+	translation := Translation{Language: target, Source: SourceAI, TranslatedAt: s.now().UTC()}
+	for _, field := range []struct {
+		source string
+		dest   *string
+	}{{source.Title, &translation.Title}, {source.Description, &translation.Description}} {
+		if field.source == "" {
+			continue
+		}
+		translationContext, cancel := context.WithTimeout(ctx, s.aiTimeout)
+		result, err := s.translator.Translate(translationContext, ai.TranslateRequest{
+			Text: field.source, SourceLanguage: source.Language, TargetLanguage: target,
+		})
+		cancel()
+		if err != nil {
+			return Translation{}, err
+		}
+		*field.dest = result.Text
+	}
+	return translation, nil
 }
 
 func (s *Service) Publish(ctx context.Context, id uuid.UUID) (Topic, error) {
@@ -113,28 +225,9 @@ func (s *Service) TranslateWithAI(ctx context.Context, id uuid.UUID, targetLangu
 		if exists && existing.Source == SourceHuman && !force {
 			continue
 		}
-		translation := Translation{Language: target, Source: SourceAI, TranslatedAt: s.now().UTC()}
-		if source.Title != "" {
-			translationContext, cancel := context.WithTimeout(ctx, s.aiTimeout)
-			result, translateErr := s.translator.Translate(translationContext, ai.TranslateRequest{
-				Text: source.Title, SourceLanguage: value.OriginalLanguage, TargetLanguage: target,
-			})
-			cancel()
-			if translateErr != nil {
-				return Topic{}, translateErr
-			}
-			translation.Title = result.Text
-		}
-		if source.Description != "" {
-			translationContext, cancel := context.WithTimeout(ctx, s.aiTimeout)
-			result, translateErr := s.translator.Translate(translationContext, ai.TranslateRequest{
-				Text: source.Description, SourceLanguage: value.OriginalLanguage, TargetLanguage: target,
-			})
-			cancel()
-			if translateErr != nil {
-				return Topic{}, translateErr
-			}
-			translation.Description = result.Text
+		translation, err := s.translateFields(ctx, source, target)
+		if err != nil {
+			return Topic{}, err
 		}
 		if err := s.repo.UpsertTranslation(ctx, id, translation); err != nil {
 			return Topic{}, err

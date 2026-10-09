@@ -62,7 +62,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	values, err := h.service.List(r.Context(), ListFilter{Language: r.URL.Query().Get("lang"), Status: Status(r.URL.Query().Get("status")), Limit: limit, Offset: offset})
+	requestedLanguage := i18n.Requested(r, h.defaultLanguage)
+	values, err := h.service.List(r.Context(), ListFilter{Language: requestedLanguage, Status: Status(r.URL.Query().Get("status")), Sort: r.URL.Query().Get("sort"), Limit: limit, Offset: offset})
 	if err != nil {
 		writeError(w, err)
 		return
@@ -112,6 +113,20 @@ func (h *Handler) AddTranslation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	value, err := h.service.AddTranslation(r.Context(), id, r.PathValue("lang"), request.Title, request.Description)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, value)
+}
+
+func (h *Handler) PreviewTranslation(w http.ResponseWriter, r *http.Request) {
+	id, err := uuid.Parse(r.PathValue("id"))
+	if err != nil {
+		writeError(w, ErrInvalid)
+		return
+	}
+	value, err := h.service.PreviewTranslation(r.Context(), id, r.PathValue("lang"))
 	if err != nil {
 		writeError(w, err)
 		return

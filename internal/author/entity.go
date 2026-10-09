@@ -11,9 +11,15 @@ import (
 
 type Status string
 
+type Role string
+
 const (
 	StatusActive    Status = "active"
 	StatusSuspended Status = "suspended"
+
+	RoleAuthor   Role = "author"
+	RoleReviewer Role = "reviewer"
+	RoleAdmin    Role = "admin"
 )
 
 var (
@@ -29,6 +35,7 @@ type Author struct {
 	Email             string    `json:"-"`
 	Bio               string    `json:"bio"`
 	PreferredLanguage string    `json:"preferred_language"`
+	Role              Role      `json:"role"`
 	Status            Status    `json:"status"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
@@ -47,10 +54,18 @@ func (a Author) Validate() error {
 		log.Println("Invalid preferred language")
 		return ErrInvalid
 	}
+	if !a.Role.Valid() {
+		return ErrInvalid
+	}
 	return nil
+}
+
+func (r Role) Valid() bool {
+	return r == RoleAuthor || r == RoleReviewer || r == RoleAdmin
 }
 
 type Update struct {
 	Bio               *string
 	PreferredLanguage *string
+	Role              *Role
 }

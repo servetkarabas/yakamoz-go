@@ -2,6 +2,7 @@ package topic
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 
@@ -73,6 +74,7 @@ func (r *MemoryRepository) List(_ context.Context, filter ListFilter) ([]Topic, 
 		}
 		values = append(values, clone(value))
 	}
+	sort.Slice(values, func(i, j int) bool { return values[i].CreatedAt.After(values[j].CreatedAt) })
 	if filter.Offset < 0 {
 		filter.Offset = 0
 	}

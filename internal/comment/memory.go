@@ -57,6 +57,16 @@ func (r *MemoryRepository) ListByTopic(_ context.Context, filter ListFilter) ([]
 	return values[filter.Offset:end], nil
 }
 
+func (r *MemoryRepository) CountByTopics(_ context.Context, topicIDs []uuid.UUID) (map[uuid.UUID]int, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	counts := make(map[uuid.UUID]int, len(topicIDs))
+	for _, id := range topicIDs {
+		counts[id] = len(r.byTopic[id])
+	}
+	return counts, nil
+}
+
 func (r *MemoryRepository) Delete(_ context.Context, id uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

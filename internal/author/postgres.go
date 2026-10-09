@@ -21,9 +21,9 @@ func NewPostgresRepository(pool *postgres.Pool) *PostgresRepository {
 
 func (r *PostgresRepository) Create(ctx context.Context, value Author) error {
 	_, err := r.pool.ExecContext(ctx, `INSERT INTO authors
-		(id, nickname, email, bio, preferred_language, status, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`, value.ID, value.Nickname, value.Email, value.Bio,
-		value.PreferredLanguage, value.Status, value.CreatedAt, value.UpdatedAt)
+		(id, nickname, email, bio, preferred_language, role, status, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, value.ID, value.Nickname, value.Email, value.Bio,
+		value.PreferredLanguage, value.Role, value.Status, value.CreatedAt, value.UpdatedAt)
 	if isUniqueViolation(err) {
 		return ErrConflict
 	}
@@ -31,19 +31,19 @@ func (r *PostgresRepository) Create(ctx context.Context, value Author) error {
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, id uuid.UUID) (Author, error) {
-	return r.scanOne(ctx, `SELECT id,nickname,email,bio,preferred_language,status,created_at,updated_at
+	return r.scanOne(ctx, `SELECT id,nickname,email,bio,preferred_language,role,status,created_at,updated_at
 		FROM authors WHERE id=$1`, id)
 }
 
 func (r *PostgresRepository) GetByNickname(ctx context.Context, nickname string) (Author, error) {
-	return r.scanOne(ctx, `SELECT id,nickname,email,bio,preferred_language,status,created_at,updated_at
+	return r.scanOne(ctx, `SELECT id,nickname,email,bio,preferred_language,role,status,created_at,updated_at
 		FROM authors WHERE lower(nickname)=lower($1)`, nickname)
 }
 
 func (r *PostgresRepository) scanOne(ctx context.Context, query string, arg any) (Author, error) {
 	var value Author
 	err := r.pool.QueryRowContext(ctx, query, arg).Scan(&value.ID, &value.Nickname, &value.Email, &value.Bio,
-		&value.PreferredLanguage, &value.Status, &value.CreatedAt, &value.UpdatedAt)
+		&value.PreferredLanguage, &value.Role, &value.Status, &value.CreatedAt, &value.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Author{}, ErrNotFound
 	}
@@ -55,7 +55,7 @@ func (r *PostgresRepository) List(ctx context.Context, filter ListFilter) ([]Aut
 	if limit <= 0 || limit > 100 {
 		limit = 100
 	}
-	rows, err := r.pool.QueryContext(ctx, `SELECT id,nickname,email,bio,preferred_language,status,created_at,updated_at
+	rows, err := r.pool.QueryContext(ctx, `SELECT id,nickname,email,bio,preferred_language,role,status,created_at,updated_at
 		FROM authors ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, max(filter.Offset, 0))
 	if err != nil {
 		return nil, err
@@ -65,7 +65,7 @@ func (r *PostgresRepository) List(ctx context.Context, filter ListFilter) ([]Aut
 	for rows.Next() {
 		var value Author
 		if err := rows.Scan(&value.ID, &value.Nickname, &value.Email, &value.Bio, &value.PreferredLanguage,
-			&value.Status, &value.CreatedAt, &value.UpdatedAt); err != nil {
+			&value.Role, &value.Status, &value.CreatedAt, &value.UpdatedAt); err != nil {
 			return nil, err
 		}
 		values = append(values, value)
@@ -84,9 +84,15 @@ func (r *PostgresRepository) Update(ctx context.Context, id uuid.UUID, update Up
 	if update.PreferredLanguage != nil {
 		current.PreferredLanguage = *update.PreferredLanguage
 	}
+	if update.Role != nil {
+		current.Role = *update.Role
+	}
 	current.UpdatedAt = time.Now().UTC()
-	_, err = r.pool.ExecContext(ctx, `UPDATE authors SET bio=$2,preferred_language=$3,updated_at=$4 WHERE id=$1`,
-		id, current.Bio, current.PreferredLanguage, current.UpdatedAt)
+	_, err = r.pool.ExecContext(ctx, `UPDATE authors SET bio=$2,preferred_language=$3,role=$4,updated_at=$5 WHERE id=$1`,
+		id, current.Bio, current.PreferredLanguage, current.Role, current.UpdatedAt)
+	if isUniqueViolation(err) {
+		return Author{}, ErrConflict
+	}
 	return current, err
 }
 

@@ -14,13 +14,14 @@ import (
 	"github.com/karabas/yakamoz/internal/topic"
 )
 
-func NewRouter(cfg config.Config, logger *slog.Logger, authorRepo author.Repository, topicRepo topic.Repository, commentRepo comment.Repository, pool *postgres.Pool) http.Handler {
+func NewRouter(cfg config.Config, logger *slog.Logger, authorRepo author.Repository, topicRepo topic.Repository, commentRepo comment.Repository, pool *postgres.Pool, reactionRepo reactionStore) http.Handler {
 	authorService := author.NewService(authorRepo)
 	topicService := topic.NewService(topicRepo, ai.Stub{}, cfg.DefaultLanguage, cfg.AITimeout)
 	commentService := comment.NewService(commentRepo)
 	authors := author.NewHandler(authorService)
 	topics := topic.NewHandler(topicService, cfg.DefaultLanguage)
 	comments := comment.NewHandler(commentService)
+	reactions := reactionHandler{store: reactionRepo}
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -47,10 +48,14 @@ func NewRouter(cfg config.Config, logger *slog.Logger, authorRepo author.Reposit
 	mux.HandleFunc("GET /api/v1/topics/{id}", topics.GetByID)
 	mux.HandleFunc("GET /api/v1/topics/by-slug/{slug}", topics.GetBySlug)
 	mux.HandleFunc("PUT /api/v1/topics/{id}/translations/{lang}", topics.AddTranslation)
+	mux.HandleFunc("POST /api/v1/topics/{id}/translations/{lang}/preview", topics.PreviewTranslation)
 	mux.HandleFunc("POST /api/v1/topics/{id}/translate", topics.Translate)
 	mux.HandleFunc("POST /api/v1/topics/{id}/publish", topics.Publish)
 	mux.HandleFunc("POST /api/v1/comments", comments.Create)
 	mux.HandleFunc("GET /api/v1/comments", comments.ListByTopic)
+	mux.HandleFunc("GET /api/v1/reactions", reactions.List)
+	mux.HandleFunc("PUT /api/v1/reactions", reactions.Set)
+	mux.HandleFunc("GET /api/v1/comments/counts", comments.CountByTopics)
 	mux.HandleFunc("GET /api/v1/comments/{id}", comments.GetByID)
 	mux.HandleFunc("DELETE /api/v1/comments/{id}", comments.Delete)
 
@@ -62,9 +67,9 @@ func NewMemory(cfg config.Config, logger *slog.Logger) http.Handler {
 	topicRepo := topic.NewMemoryRepository()
 	commentRepo := comment.NewMemoryRepository()
 	seed(context.Background(), cfg, logger, authorRepo, topicRepo, commentRepo)
-	return NewRouter(cfg, logger, authorRepo, topicRepo, commentRepo, nil)
+	return NewRouter(cfg, logger, authorRepo, topicRepo, commentRepo, nil, newMemoryReactionStore())
 }
 
 func NewPostgres(ctx context.Context, cfg config.Config, logger *slog.Logger, pool *postgres.Pool) http.Handler {
-	return NewRouter(cfg, logger, author.NewPostgresRepository(pool), topic.NewPostgresRepository(pool), comment.NewPostgresRepository(pool), pool)
+	return NewRouter(cfg, logger, author.NewPostgresRepository(pool), topic.NewPostgresRepository(pool), comment.NewPostgresRepository(pool), pool, newPostgresReactionStore(pool))
 }
